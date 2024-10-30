@@ -1,0 +1,96 @@
+import networkx as nx
+import matplotlib.pyplot as plt
+import gurobipy as gp
+from gurobipy import GRB
+
+# Define locations and distances for the graph
+locations = {
+    "Bunker": (0, 100),
+    "Grocers1": (200, 600),
+    "Pharmacy": (450, 600),
+    "Hospital": (550, 400),
+    "GasStation": (450, 200),
+    "A": (0, 0),
+    "B": (0, 200),
+    "C": (200, 0),
+    "D": (200, 200),
+    "E": (200, 400),
+    "F": (200, 500),
+    "G": (200, 700),
+    "H": (450, 0),
+    "I": (450, 400),
+    "J": (450, 500),
+    "K": (450, 700),
+    "L": (650, 0),
+    "M": (650, 400),
+    "N": (650, 600),
+    "O": (650, 700),
+    "P": (950, 600)
+}
+
+# Define edges and distances
+edges = [
+    ("Bunker", "A", 100), ("A", "B", 200), ("B", "C", 100),
+    ("C", "D", 100), ("D", "E", 100), ("E", "F", 100), ("F", "Grocers1", 250),
+    ("Grocers1", "Pharmacy", 200), ("Pharmacy", "Hospital", 200),
+    ("Hospital", "GasStation", 300), ("GasStation", "I", 200),
+    ("I", "M", 300), ("M", "N", 200), ("N", "O", 200), ("O", "G", 300)
+]
+
+# Create the graph
+G = nx.Graph()
+for node, pos in locations.items():
+    G.add_node(node, pos=pos)
+for edge in edges:
+    G.add_edge(edge[0], edge[1], weight=edge[2])
+
+# Define mandatory nodes
+mandatory_nodes = ["Bunker", "Grocers1", "Pharmacy", "Hospital", "GasStation"]
+
+# TSP solver function using Gurobi with subtour elimination constraints
+def solve_tsp(graph, locations_to_visit):
+    model = gp.Model()
+    nodes = locations_to_visit
+    edges = [(i, j) for i in nodes for j in nodes if i != j]
+    
+    # Variables: edge selection
+    x = model.addVars(edges, vtype=GRB.BINARY, name="x")
+    
+    # Objective: minimize the total distance
+    model.setObjective(gp.quicksum(
+        graph[i][j]["weight"] * x[i, j] if graph.has_edge(i, j) else 0
+        for i, j in edges
+    ), GRB.MINIMIZE)
+    
+    # Constraints to ensure each node has exactly one incoming and one outgoing edge
+    for i in nodes:
+        model.addConstr(gp.quicksum(x[i, j] for j in nodes if j != i) == 1)
+        model.addConstr(gp.quicksum(x[j, i] for j in nodes if j != i) == 1)
+    
+    # Subtour elimination constraints
+    u = model.addVars(nodes, vtype=GRB.INTEGER, name="u")
+    for i in nodes[1:]:  # Skip the depot node
+        for j in nodes[1:]:
+            if i != j:
+                model.addConstr(u[i] - u[j] + len(nodes) * x[i, j] <= len(nodes) - 1)
+
+    # Solve
+    model.optimize()
+    
+    # Extract the optimal route if a solution is found
+    if model.status == GRB.OPTIMAL:
+        selected_edges = [(i, j) for i, j in edges if x[i, j].x > 0.5]
+        return selected_edges
+    else:
+        return None
+
+# Find the best path using TSP on mandatory nodes
+best_route = solve_tsp(G, mandatory_nodes)
+
+# Display the optimal route for the TSP solution
+if best_route:
+    print("Optimal Route to Visit All Mandatory Nodes and Return to Start:")
+    for edge in best_route:
+        print(f"{edge[0]} -> {edge[1]}")
+else:
+    print("No feasible solution found for the TSP route.")
